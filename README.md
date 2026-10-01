@@ -9,20 +9,23 @@ Use Python 3.11 or newer. Open PowerShell, then run the following commands from 
 ```powershell
 cd "C:\path\to\bloomberg-competition-screener"
 py --version
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest
+py run\00_setup.py
 ```
 
 If `py -3.11` is unavailable, install Python from [python.org](https://www.python.org/downloads/) and enable **Add Python to PATH**, or use the version shown by `py --list`.
 
-You do not need to activate the virtual environment. The safest commands are the project launchers, which always use `.venv` and the correct working directory:
+You do not need to activate the virtual environment. The setup script creates `.venv` and installs everything automatically. The launchers always use `.venv` and the correct working directory:
 
 ```powershell
 python run\01_download_data.py   # download or update the local data
 python run\02_run_screener.py    # produce the weekly top-10 ranking
 python run\03_run_backtest.py    # run the three-year sanity-check backtest
+```
+
+To run the tests after setup:
+
+```powershell
+\.venv\Scripts\python.exe -m pytest
 ```
 
 In VS Code, open the files in `run/` and click **Run Python File**. Run them in this order: download data, screener, then optional backtest. The first download can take several minutes and requires an internet connection.
