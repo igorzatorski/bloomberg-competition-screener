@@ -1,8 +1,10 @@
 # Bloomberg Competition Screener
 
-Small weekly momentum screener for a simulated Bloomberg Global Trading Challenge portfolio. First download a persistent local dataset, then run the screener offline. Yahoo Finance supplies prices; trades are entered manually in Bloomberg. No Bloomberg API, automated execution or backtest command yet.
+Small weekly momentum screener and exploratory backtest for a simulated Bloomberg Global Trading Challenge portfolio. First download a persistent local dataset, then run the screener or the offline three-year backtest. Yahoo Finance supplies prices; trades are entered manually in Bloomberg. The project does not use the Bloomberg API or automate execution.
 
 ## Setup (Windows PowerShell, Python 3.11+)
+
+For everyday use after setup, open one of the scripts in **`run/`** and click **Run**: `run/01_download_data.py` updates data, `run/02_run_screener.py` screens the saved dataset, and `run/03_run_backtest.py` runs the three-year backtest. These launchers use the project's `.venv` and set the working directory automatically, even if the editor selects another Python. The screening launcher explicitly skips failed ticker updates and reports exclusions. They also forward command-line arguments. Initial `.venv` setup is still required.
 
 ```powershell
 py -3.11 -m venv .venv
@@ -10,6 +12,7 @@ py -3.11 -m venv .venv
 python -m pip install -e ".[dev]"
 download-data
 run-screener
+run-backtest
 python -m pytest
 ```
 
@@ -61,26 +64,26 @@ For a small sanity check, `run-screener --skip-failed` explicitly excludes faile
 
 Screening reads adjusted closes and volume locally, using only sessions strictly before its cutoff. At least 252 valid sessions are required. Missing, stale, non-finite or invalid histories are rejected. The downloader checks observed-session completeness independently of strategy filters.
 
-Eligibility: positive 21-session and 63-session momentum; latest adjusted close within 10% of its maximum over 252 sessions; average adjusted close times reported volume over 21 sessions at least USD 10m. The latter is a liquidity proxy, not exact historical dollar turnover.
+Eligibility: positive 21-session and 63-session momentum; 63-session return at or above the 70th percentile of all names with valid 252-session histories (computed before other filters, with boundary ties retained); latest adjusted close within 10% of its maximum over 252 sessions and strictly above its 20-session average; average adjusted close times reported volume over 21 sessions at least USD 10m. The latter is a liquidity proxy, not exact historical dollar turnover.
+
+The compounded 21-session return must remain positive after excluding its best daily close-to-close return: `(1 + momentum_21d) / (1 + best_day_return) - 1`. Values within 1e-12 of zero are treated as zero. This prevents a single jump from being the sole source of positive monthly momentum. Filters report the first failed rule for each rejected stock.
 
 Score uses percentile ranks **among eligible stocks**:
 
 | Feature | Weight |
 |---|---:|
-| 21-session momentum | 45% |
-| 63-session momentum | 25% |
-| Annualized 21-session return volatility | 20% |
-| Close / maximum adjusted close in 252 sessions | 10% |
+| 21-session momentum | 50% |
+| 63-session momentum | 50% |
 
-Higher values score better. Volatility is sample standard deviation of daily simple returns times sqrt(252). Ties resolve by ticker. This is a transparent heuristic, with no fitted parameters or evidence of predictive outperformance. The closing maximum is a 52-week approximation, **not an all-time high** or intraday high.
+Higher values score better; ties resolve by ticker. Volatility remains a diagnostic (sample standard deviation of daily simple returns times sqrt(252)), with no score weight. Reports include the 20-session average, monthly return without its best day, best daily return, and largest positive/negative opening gaps over 21 sessions with dates. Gap = adjusted Open / previous adjusted Close - 1; dividend adjustments mean this is not exactly the raw quoted ex-dividend gap. If a gap direction never occurs, its value is zero and date blank. Gaps do not automatically exclude a stock. This is a heuristic, with no fitted parameters or evidence of predictive outperformance. The closing maximum is a 52-week approximation, **not an all-time high** or intraday high.
 
-Top five receive proposed equal weights of 20% each. Fewer qualifiers leave 20% per selected name and the rest in cash; the program never forces ineligible names or rescales above the cap. No hedging, shorting or leverage. Weights are targets, not share quantities or validated Bloomberg orders. If the competition cap refers to initial USD notional instead of current equity, translate these weights under the actual rules before trading; appreciation and rebalancing can change compliance.
+Top ten receive proposed equal weights of 10% each. Fewer qualifiers leave 10% per selected name and the rest in cash; the program never forces ineligible names or rescales the remaining positions. Portfolio size is defined once in `ranking.py` for reuse by the future backtest. No hedging, shorting or leverage. Weights are targets, not share quantities or validated Bloomberg orders. Confirm actual competition notional limits before trading. There is currently no sector limit: ten names can still be concentrated in related industries.
 
 ## Weekly use
 
-After Friday's US close, run `download-data` using Saturday's date as `--before`, then `run-screener`. Review the five names and trade at the next permitted session. Compare target holdings with existing positions rather than adding another 20%. This version has no holdings or order-difference calculator. Transaction prices, whole shares, corporate actions and Yahoo/Bloomberg differences require manual checking.
+Each weekend, run `download-data`, then `run-screener --skip-failed` to explicitly exclude failed updates. Both commands retain timestamped universe/output records. If downloading on Friday after the close, set `--before` to Saturday only once that date is reached (future cutoffs are rejected); the simplest routine is Saturday or Sunday. Review the ten names and trade at the next permitted session. Compare target holdings with existing positions rather than adding another 10%. This version has no holdings or order-difference calculator. Transaction prices, whole shares, corporate actions and Yahoo/Bloomberg differences require manual checking. Weekly runs are manual; no scheduler is installed.
 
-Each screening run creates a UTC timestamped output folder with `ranking.csv`, `portfolio.csv`, `rejected.csv`, `universe.csv` and `metadata.json` referring to the local dataset. Prices are not duplicated in each report. Later downloads can revise the price store: retain a dataset copy if exact historical-run reproduction is required. Yahoo can throttle or omit symbols; check `download_report.csv`.
+Each screening run creates a UTC timestamped output folder with `ranking.csv`, `portfolio.csv`, `rejected.csv`, `universe.csv`, `report.txt` and `metadata.json` referring to the local dataset. The console and text report show aligned bordered tables with company names, score out of 100, percentage returns and target weights, followed by a separate risk table. CSVs retain full numerical precision and gap dates. Prices are not duplicated in each report. Later downloads can revise the price store: retain a dataset copy if exact historical-run reproduction is required. Yahoo can throttle or omit symbols; check `download_report.csv`.
 
 ## Competition context
 
@@ -96,10 +99,16 @@ src/competition_screener/
   storage.py    # validation, safe Parquet storage and offline reading
   download.py   # bootstrap/incremental download command
   ranking.py    # pure features, filters, score, weights
+  reporting.py  # formatted console/text tables, separate from calculations
   cli.py        # command and saved artifacts
+  backtest.py   # weekly 10-slot backtest and SPY comparison
+run/
+  01_download_data.py  # clickable data update launcher
+  02_run_screener.py  # clickable weekly screener launcher
+  03_run_backtest.py  # clickable backtest launcher
 tests/          # offline deterministic checks
 ```
 
 Keep `main` for reviewed working versions; use short branches such as `feature/holdings-diff` for later additions. Generated data and virtual environments are ignored. No GitHub remote or publication is created automatically.
 
-A future 2–3-year mini backtest will be an exploratory sanity check. Today's top 1000 creates survivorship/current-capitalization selection bias; snapshots from now do not reconstruct past constituents. A bias-free backtest would need point-in-time membership, capitalizations and delisted securities. Trade execution must be no earlier than the session after signals. Current adjusted histories may reflect later corporate actions. No backtest command is implemented yet.
+The mini backtest is an exploratory sanity check, not a research-grade historical test. Run `run/03_run_backtest.py` (or `python -m competition_screener.backtest`) after downloading enough warm-up history. It uses three calendar years by default, weekly signals, ten equal target slots, next-session open execution, 10 bps per-side transaction costs and SPY as a dividend-adjusted S&P 500 proxy. It writes `equity.csv`, `weekly_selections.csv`, `trades.csv`, `statistics.csv`, `monthly_returns.csv`, `equity_curve.png` and `monthly_returns_distribution.png` under `outputs/backtests/<UTC timestamp>`. The report includes total return, CAGR, volatility, Sharpe at zero risk-free rate, maximum drawdown, positive/negative months, average monthly return, historical monthly VaR at 5% and 1%, exposure, turnover and fees. VaR is the empirical lower quantile of monthly returns, so it is shown as a negative return. Today's top 1000 creates survivorship/current-capitalization selection bias; snapshots from now do not reconstruct past constituents. A bias-free backtest would need point-in-time membership, capitalizations and delisted securities. Current adjusted histories may reflect later corporate actions.

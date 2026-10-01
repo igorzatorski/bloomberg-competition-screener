@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,7 +15,12 @@ from .data import UNIVERSE_SOURCE, download_prices, load_universe_table
 from .storage import PRICE_COLUMNS, price_path, save_json, save_prices, validate_prices
 
 
-def print_progress(rows: list[dict], total: int, active: str = "") -> None:
+def _duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
+
+
+def print_progress(rows: list[dict], total: int, active: str = "", started: float | None = None) -> None:
     done = len(rows)
     fraction = done / total if total else 1.0
     width = 28
@@ -23,8 +29,10 @@ def print_progress(rows: list[dict], total: int, active: str = "") -> None:
     failed = sum(row["status"] == "failed" for row in rows)
     downloaded = done - cached - failed
     bar = "#" * filled + "-" * (width - filled)
+    elapsed = time.monotonic() - started if started is not None else 0.0
+    eta = elapsed * (1 - fraction) / fraction if fraction > 0 else 0.0
     print(
-        f"[{bar}] {fraction:6.1%} | {done}/{total} | saved: {downloaded} | cached: {cached} | failed: {failed} {active}",
+        f"[{bar}] {fraction:6.1%} | {done}/{total} | elapsed: {_duration(elapsed)} | ETA: {_duration(eta)} | saved: {downloaded} | cached: {cached} | failed: {failed} {active}",
         flush=True,
     )
 
@@ -48,10 +56,13 @@ def update_dataset(
     years: int = 3,
     universe_path: Path | None = None,
     refresh: bool = False,
+    start_date: pd.Timestamp | None = None,
 ) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).isoformat()
-    start = cutoff - pd.DateOffset(years=years)
+    start = start_date if start_date is not None else cutoff - pd.DateOffset(years=years)
+    if start.tzinfo is not None or start != start.normalize() or start >= cutoff:
+        raise ValueError("History start must be a date before cutoff")
     previous_path = root / "dataset.json"
     previous = None
     if previous_path.exists():
@@ -86,7 +97,8 @@ def update_dataset(
     pd.DataFrame(columns=["ticker", "date", "reason"]).to_csv(
         root / "missing_sessions.csv", index=False
     )
-    print_progress([], len(universe), "Checking saved histories...")
+    started = time.monotonic()
+    print_progress([], len(universe), "Checking saved histories...", started)
     benchmark = validate_prices(
         download_prices(["SPY"], cutoff, start).get("SPY", pd.DataFrame())
     )
@@ -145,11 +157,11 @@ def update_dataset(
             groups.setdefault(begin, []).append(ticker)
         except (ValueError, OSError) as error:
             rows.append({"ticker": ticker, "status": "failed", "error": str(error)})
-    print_progress(rows, len(universe))
+    print_progress(rows, len(universe), started=started)
     for begin, tickers in groups.items():
         for offset in range(0, len(tickers), 50):
             batch = tickers[offset : offset + 50]
-            print_progress(rows, len(universe), f"Fetching {batch[0]} ... {batch[-1]}")
+            print_progress(rows, len(universe), f"Fetching {batch[0]} ... {batch[-1]}", started)
             try:
                 fetched = download_prices(batch, cutoff, begin)
             except (
@@ -230,7 +242,7 @@ def update_dataset(
                     rows.append(
                         {"ticker": ticker, "status": "failed", "error": str(error)}
                     )
-            print_progress(rows, len(universe))
+            print_progress(rows, len(universe), started=started)
     report = pd.DataFrame(rows)
     report.to_csv(root / "download_report.csv", index=False)
     pd.DataFrame(missing_rows, columns=["ticker", "date", "reason"]).to_csv(
@@ -255,6 +267,7 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=Path("data/market"))
     parser.add_argument("--universe", type=Path, help="Optional custom ticker CSV")
     parser.add_argument("--years", type=int, choices=[2, 3], default=3)
+    parser.add_argument("--start", help="Explicit history start, overrides --years; useful for backtest warmup")
     parser.add_argument(
         "--before",
         default=datetime.now(ZoneInfo("America/New_York")).date().isoformat(),
@@ -272,7 +285,8 @@ def main() -> None:
         ):
             raise ValueError("--before must be a date no later than today in New York")
         result = update_dataset(
-            args.data_dir, cutoff, args.years, args.universe, args.refresh
+            args.data_dir, cutoff, args.years, args.universe, args.refresh,
+            pd.Timestamp(args.start) if args.start else None,
         )
         print(f"Saved: {args.data_dir.resolve()}; failures: {result['failed_count']}")
         if not result["complete"]:

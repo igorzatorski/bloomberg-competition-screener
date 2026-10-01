@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from .ranking import FEATURES, WEIGHTS, rank_universe, select_portfolio
+from .ranking import FEATURES, PORTFOLIO_SIZE, WEIGHTS, rank_universe, select_portfolio
+from .reporting import portfolio_report
 from .storage import load_dataset
 
 
@@ -83,8 +84,10 @@ def main() -> None:
             "downloaded_count": len(prices),
             "eligible_count": len(ranking),
             "score_weights": dict(zip(FEATURES, WEIGHTS)),
-            "cash_weight": round(1 - len(portfolio) * 0.2, 2),
-            "position_cap_interpretation": "20% of portfolio; confirm competition notional rules",
+            "screening_rules": "momentum-v2: positive 21d/63d; top 30% 63d among data-valid names; within 10% of 252-session high; close > SMA20; 21d return excluding best day > 0; traded-value proxy >= USD 10m",
+            "cash_weight": round(1 - portfolio.target_weight.sum(), 10),
+            "portfolio_size": PORTFOLIO_SIZE,
+            "position_cap_interpretation": "10% target equity weight; confirm competition notional limits",
             "data_directory": str(args.data_dir.resolve()),
             "dataset_updated_at_utc": dataset_metadata["updated_at_utc"],
             "dataset_complete": dataset_metadata["complete"],
@@ -93,22 +96,9 @@ def main() -> None:
         (run / "metadata.json").write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"
         )
-        if portfolio.empty:
-            print(
-                "No eligible stocks. Review rejected.csv; proposed portfolio is 100% cash."
-            )
-        else:
-            print(
-                portfolio[
-                    [
-                        "ticker",
-                        "score",
-                        "momentum_21d",
-                        "volatility_21d",
-                        "target_weight",
-                    ]
-                ].to_string(index=False)
-            )
+        report = portfolio_report(portfolio, universe, len(ranking), str(cutoff.date()))
+        (run / "report.txt").write_text(report + "\n", encoding="utf-8")
+        print(report)
         print(f"Cash: {metadata['cash_weight']:.0%}. Saved: {run.resolve()}")
     except (ValueError, OSError, ImportError) as error:
         parser.exit(1, f"Screener failed: {error}\n")
