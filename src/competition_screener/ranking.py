@@ -5,7 +5,7 @@ import pandas as pd
 
 FEATURES = ["momentum_21d", "momentum_63d"]
 WEIGHTS = [0.50, 0.50]
-PORTFOLIO_SIZE = 10
+PORTFOLIO_SIZE = 8
 REPORT_COLUMNS = [
     "ticker",
     "session",

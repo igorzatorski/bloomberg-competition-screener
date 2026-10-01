@@ -18,7 +18,7 @@ You do not need to activate the virtual environment. The setup script creates `.
 
 ```powershell
 python run\01_download_data.py   # download or update the local data
-python run\02_run_screener.py    # produce the weekly top-10 ranking
+python run\02_run_screener.py    # produce the weekly top-8 ranking (12.5% each)
 python run\03_run_backtest.py    # run the three-year sanity-check backtest
 ```
 
@@ -29,6 +29,8 @@ To run the tests after setup:
 ```
 
 In VS Code, open the files in `run/` and click **Run Python File**. Run them in this order: download data, screener, then optional backtest. The first download can take several minutes and requires an internet connection.
+
+Each script prints the next recommended command when it finishes: setup is **Step 0**, data download is **Step 1**, screening is **Step 2**, and the optional backtest is **Step 3**.
 
 If PowerShell says that script execution is disabled, do not change system-wide policy. Either continue using the launcher commands above, or allow scripts only for your user account:
 
@@ -96,7 +98,7 @@ Score uses percentile ranks **among eligible stocks**:
 
 Higher values score better; ties resolve by ticker. Volatility remains a diagnostic (sample standard deviation of daily simple returns times sqrt(252)), with no score weight. Reports include the 20-session average, monthly return without its best day, best daily return, and largest positive/negative opening gaps over 21 sessions with dates. Gap = adjusted Open / previous adjusted Close - 1; dividend adjustments mean this is not exactly the raw quoted ex-dividend gap. If a gap direction never occurs, its value is zero and date blank. Gaps do not automatically exclude a stock. This is a heuristic, with no fitted parameters or evidence of predictive outperformance. The closing maximum is a 52-week approximation, **not an all-time high** or intraday high.
 
-Top ten receive proposed equal weights of 10% each. Fewer qualifiers leave 10% per selected name and the rest in cash; the program never forces ineligible names or rescales the remaining positions. Portfolio size is defined once in `ranking.py` for reuse by the future backtest. No hedging, shorting or leverage. Weights are targets, not share quantities or validated Bloomberg orders. Confirm actual competition notional limits before trading. There is currently no sector limit: ten names can still be concentrated in related industries.
+The default portfolio contains eight equal-weight positions at 12.5% each. The backtest can compare 5-20 slots with `run/04_compare_slots.py`; the default eight-slot configuration was selected as a compromise between concentration and risk in the exploratory comparison. No hedging, shorting or leverage. Weights are targets, not share quantities or validated Bloomberg orders. Confirm actual competition notional limits before trading. There is currently no sector limit: names can still be concentrated in related industries.
 
 ## Weekly use
 
@@ -125,9 +127,10 @@ run/
   01_download_data.py  # clickable data update launcher
   02_run_screener.py  # clickable weekly screener launcher
   03_run_backtest.py  # clickable backtest launcher
+  04_compare_slots.py  # compare 5-20 portfolio slots
 tests/          # offline deterministic checks
 ```
 
 Keep `main` for reviewed working versions; use short branches such as `feature/holdings-diff` for later additions. Generated data and virtual environments are ignored. No GitHub remote or publication is created automatically.
 
-The mini backtest is an exploratory sanity check, not a research-grade historical test. Run `run/03_run_backtest.py` (or `python -m competition_screener.backtest`) after downloading enough warm-up history. It uses three calendar years by default, weekly signals, ten equal target slots, next-session open execution, 10 bps per-side transaction costs and SPY as a dividend-adjusted S&P 500 proxy. It writes `equity.csv`, `weekly_selections.csv`, `trades.csv`, `statistics.csv`, `monthly_returns.csv`, `equity_curve.png` and `monthly_returns_distribution.png` under `outputs/backtests/<UTC timestamp>`. The report includes total return, CAGR, volatility, Sharpe at zero risk-free rate, maximum drawdown, positive/negative months, average monthly return, historical monthly VaR at 5% and 1%, exposure, turnover and fees. VaR is the empirical lower quantile of monthly returns, so it is shown as a negative return. Today's top 1000 creates survivorship/current-capitalization selection bias; snapshots from now do not reconstruct past constituents. A bias-free backtest would need point-in-time membership, capitalizations and delisted securities. Current adjusted histories may reflect later corporate actions.
+The mini backtest is an exploratory sanity check, not a research-grade historical test. Run `run/03_run_backtest.py` (or `python -m competition_screener.backtest`) after downloading enough warm-up history. It uses three calendar years by default, weekly signals, eight equal target slots at 12.5% each, next-session open execution, 10 bps per-side transaction costs and SPY as a dividend-adjusted S&P 500 proxy. It writes `equity.csv`, `weekly_selections.csv`, `trades.csv`, `statistics.csv`, `monthly_returns.csv`, `equity_curve.png` and `monthly_returns_distribution.png` under `outputs/backtests/<UTC timestamp>`. The report includes total return, CAGR, volatility, Sharpe at zero risk-free rate, maximum drawdown, positive/negative months, average monthly return, historical monthly VaR at 5% and 1%, exposure, turnover and fees. VaR is the empirical lower quantile of monthly returns, so it is shown as a negative return. Today's top 1000 creates survivorship/current-capitalization selection bias; snapshots from now do not reconstruct past constituents. Current adjusted histories may reflect later corporate actions.

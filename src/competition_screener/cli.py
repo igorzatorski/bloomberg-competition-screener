@@ -100,5 +100,6 @@ def main() -> None:
         (run / "report.txt").write_text(report + "\n", encoding="utf-8")
         print(report)
         print(f"Cash: {metadata['cash_weight']:.0%}. Saved: {run.resolve()}")
+        print("\nSTEP 2 COMPLETE — optional next step: python run\\03_run_backtest.py")
     except (ValueError, OSError, ImportError) as error:
         parser.exit(1, f"Screener failed: {error}\n")

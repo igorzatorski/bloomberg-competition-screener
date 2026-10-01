@@ -43,11 +43,11 @@ def test_portfolio_cap_and_cash():
     assert select_portfolio(
         pd.DataFrame({"ticker": list("ABCDEFGHIJKL")})
     ).target_weight.sum() == pytest.approx(1)
-    assert len(select_portfolio(pd.DataFrame({"ticker": list("ABCDEFGHIJKL")}))) == 10
-    assert select_portfolio(pd.DataFrame({"ticker": ["A"]})).target_weight.sum() == 0.1
+    assert len(select_portfolio(pd.DataFrame({"ticker": list("ABCDEFGHIJKL")}))) == 8
+    assert select_portfolio(pd.DataFrame({"ticker": ["A"]})).target_weight.sum() == 0.125
     assert select_portfolio(
         pd.DataFrame({"ticker": list("ABC")})
-    ).target_weight.sum() == pytest.approx(0.3)
+    ).target_weight.sum() == pytest.approx(0.375)
     assert select_portfolio(pd.DataFrame()).empty
 
 

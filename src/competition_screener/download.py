@@ -294,6 +294,7 @@ def main() -> None:
                 1,
                 "Dataset incomplete; see download_report.csv and rerun download-data\n",
             )
+        print("\nSTEP 1 COMPLETE — now run: python run\\02_run_screener.py")
     except (ValueError, OSError, ImportError, YFException) as error:
         parser.exit(1, f"Download failed: {error}\n")
 

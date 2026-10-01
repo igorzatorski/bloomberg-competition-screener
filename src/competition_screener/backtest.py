@@ -10,7 +10,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.ticker import PercentFormatter
+from matplotlib.ticker import AutoMinorLocator, PercentFormatter
 
 from .ranking import rank_features
 from .storage import load_dataset, price_path
@@ -97,14 +97,14 @@ def _solve_rebalance(equity: float, old: dict[str, float], targets: dict[str, fl
     return new, cash, fees, notional
 
 
-def run_backtest(prices: dict[str, pd.DataFrame], benchmark: pd.DataFrame, start: str | pd.Timestamp, end: str | pd.Timestamp, initial_capital: float = 1_000_000, cost_bps: float = 10) -> dict[str, pd.DataFrame]:
+def run_backtest(prices: dict[str, pd.DataFrame], benchmark: pd.DataFrame, start: str | pd.Timestamp, end: str | pd.Timestamp, initial_capital: float = 1_000_000, cost_bps: float = 10, full_exposure: bool = True, slots: int = 10, feature_table: pd.DataFrame | None = None) -> dict[str, pd.DataFrame]:
     fee = cost_bps / 10_000
     spy = benchmark.sort_index()
     sessions = spy.index[(spy.index >= pd.Timestamp(start)) & (spy.index < pd.Timestamp(end))]
     if len(sessions) < 20: raise ValueError("Backtest needs at least 20 SPY sessions")
     signal_dates = sessions.to_series().groupby(sessions.to_period("W-SUN")).first().values
     signal_dates = pd.DatetimeIndex(signal_dates)
-    features = _features(prices, signal_dates)
+    features = feature_table if feature_table is not None else _features(prices, signal_dates)
     holdings: dict[str, float] = {}; cash = initial_capital; fees_total = 0.0; turnover = 0.0
     rows, trades, selections = [], [], []
     started = time.monotonic()
@@ -113,13 +113,24 @@ def run_backtest(prices: dict[str, pd.DataFrame], benchmark: pd.DataFrame, start
         if len(sig) and sig[-1] == trade_date:
             snap = features[features.signal_date == trade_date].drop(columns="signal_date")
             ranked, _ = rank_features(snap)
-            chosen = ranked.head(10)
+            chosen = ranked.head(slots)
+            if full_exposure and len(chosen) < slots:
+                # Competition mode keeps the portfolio fully invested. If hard
+                # filters leave fewer than ten names, fill remaining slots with
+                # the strongest data-valid momentum names rather than cash.
+                fallback = snap.loc[~snap.ticker.isin(chosen.ticker)].copy()
+                if not fallback.empty:
+                    fallback["fallback_score"] = fallback[["momentum_21d", "momentum_63d"]].rank(pct=True).mean(axis=1)
+                    fallback = fallback.sort_values(["fallback_score", "ticker"], ascending=[False, True]).head(slots - len(chosen))
+                    fallback["rank"] = np.arange(len(chosen) + 1, len(chosen) + len(fallback) + 1)
+                    fallback["score"] = fallback["fallback_score"]
+                    chosen = pd.concat([chosen, fallback], ignore_index=True)
             names = chosen.ticker.tolist()
             px = {t: float(prices[t].loc[trade_date, "Open"]) for t in set(names) | set(holdings) if trade_date in prices[t].index}
             # Existing positions must be valued even when the new ranking drops them.
             names = [t for t in names if t in px]
             names = [t for t in names if t in px]
-            targets = {t: 0.1 for t in names}
+            targets = {t: 1 / slots for t in names}
             marked = cash + sum(q * float(prices[t].loc[trade_date, "Open"]) for t, q in holdings.items() if trade_date in prices[t].index)
             old_value = {t: q * float(prices[t].loc[trade_date, "Open"]) for t, q in holdings.items() if trade_date in prices[t].index}
             holdings, cash, fees, notion = _solve_rebalance(marked, {t: q for t, q in holdings.items() if t in old_value}, targets, px, fee)
@@ -127,7 +138,7 @@ def run_backtest(prices: dict[str, pd.DataFrame], benchmark: pd.DataFrame, start
             for t in set(old_value) | set(targets):
                 delta = targets.get(t, 0) * (marked - fees) - old_value.get(t, 0)
                 if abs(delta) > 1e-6: trades.append({"date": trade_date, "ticker": t, "notional": delta, "fee": abs(delta) * fee})
-            for _, r in chosen.iterrows(): selections.append({"signal_date": trade_date, "trade_date": trade_date, "ticker": r.ticker, "rank": r.rank, "score": r.score, "target_weight": 0.1})
+            for _, r in chosen.iterrows(): selections.append({"signal_date": trade_date, "trade_date": trade_date, "ticker": r.ticker, "rank": r.rank, "score": r.score, "target_weight": 1 / slots})
         close_values = sum(q * float(prices[t].loc[trade_date, "Close"]) for t, q in holdings.items() if trade_date in prices[t].index)
         net = cash + close_values
         rows.append({"date": trade_date, "strategy_net": net, "strategy_gross": net + fees_total, "cash": cash, "n_positions": len(holdings), "exposure": close_values / net if net else 0, "fees_cumulative": fees_total})
@@ -172,7 +183,7 @@ def statistics(equity: pd.DataFrame, trades: pd.DataFrame, start_capital: float,
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run a 3-year weekly 10-slot backtest")
-    p.add_argument("--data-dir", type=Path, default=Path("data/market")); p.add_argument("--before", type=str); p.add_argument("--years", type=int, default=3); p.add_argument("--cost-bps", type=float, default=10); p.add_argument("--capital", type=float, default=1_000_000); p.add_argument("--output", type=Path, default=Path("outputs/backtests"))
+    p.add_argument("--data-dir", type=Path, default=Path("data/market")); p.add_argument("--before", type=str); p.add_argument("--years", type=int, default=3); p.add_argument("--cost-bps", type=float, default=10); p.add_argument("--capital", type=float, default=1_000_000); p.add_argument("--output", type=Path, default=Path("outputs/backtests")); p.add_argument("--mode", choices=["full", "natural"], default="full", help="full=fill to 100%% exposure; natural=keep cash when fewer names qualify"); p.add_argument("--slots", type=int, choices=range(5, 21), default=8, help="number of equal-weight portfolio slots (5-20; default 8)")
     a = p.parse_args(argv); root = a.data_dir
     cutoff = pd.Timestamp(a.before) if a.before else pd.Timestamp(json.loads((root / "dataset.json").read_text())["cutoff_exclusive"])
     _, prices, _ = load_dataset(root, cutoff, skip_failed=True)
@@ -185,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     adjustment = benchmark["Adj Close"] / benchmark["Close"]
     benchmark["Open"] = benchmark["Open"] * adjustment
     benchmark["Close"] = benchmark["Close"] * adjustment
-    result = run_backtest(prices, benchmark, start, cutoff, a.capital, a.cost_bps)
+    result = run_backtest(prices, benchmark, start, cutoff, a.capital, a.cost_bps, full_exposure=a.mode == "full", slots=a.slots)
     out = a.output / pd.Timestamp.utcnow().strftime("%Y%m%d_%H%M%S"); out.mkdir(parents=True, exist_ok=True)
     result["equity"].to_csv(out / "equity.csv", index=False); result["trades"].to_csv(out / "trades.csv", index=False); result["selections"].to_csv(out / "weekly_selections.csv", index=False)
     stats = statistics(result["equity"], result["trades"], a.capital, a.cost_bps); stats.to_csv(out / "statistics.csv", index=False)
@@ -219,11 +230,12 @@ def main(argv: list[str] | None = None) -> int:
     ax.legend(frameon=False, ncol=4, loc="upper left"); ax.grid(axis="y", alpha=.22)
     rug.scatter(monthly.strategy_return, np.ones(len(monthly)), marker="|", s=180, lw=1.5, color="tab:blue", label="Strategy")
     rug.scatter(monthly.sp500_return, np.zeros(len(monthly)), marker="|", s=180, lw=1.5, color="tab:orange", label="SPY")
-    rug.set_yticks([0, 1], ["SPY", "Strategy"]); rug.set_ylim(-.5, 1.5); rug.set_xlabel("Monthly return"); rug.xaxis.set_major_formatter(PercentFormatter(1.0)); rug.grid(axis="x", alpha=.22)
+    rug.set_yticks([0, 1], ["SPY", "Strategy"]); rug.set_ylim(-.5, 1.5); rug.set_xlabel("Monthly return"); rug.xaxis.set_major_formatter(PercentFormatter(1.0)); rug.xaxis.set_minor_locator(AutoMinorLocator(5)); rug.grid(axis="x", which="major", alpha=.22); rug.grid(axis="x", which="minor", alpha=.10, linestyle=":")
     fig.tight_layout(); fig.savefig(out / "monthly_returns_distribution.png", dpi=160, bbox_inches="tight"); plt.close(fig)
-    print(f"Saved backtest: {out}"); print(_format_stats(stats))
+    print(f"Mode: {a.mode} | Slots: {a.slots} | Saved backtest: {out}"); print(_format_stats(stats))
     print(f"\nCharts: {out / 'equity_curve.png'}")
     print(f"        {out / 'monthly_returns_distribution.png'}")
+    print("\nSTEP 3 COMPLETE — backtest finished.")
     return 0
 
 

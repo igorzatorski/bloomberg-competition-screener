@@ -23,7 +23,7 @@ def main() -> int:
         if completed.returncode:
             return completed.returncode
     print("Setup complete. You do not need to activate the virtual environment.")
-    print("Next: python run\\01_download_data.py")
+    print("\nSTEP 0 COMPLETE — now run: python run\\01_download_data.py")
     return 0
 
 
