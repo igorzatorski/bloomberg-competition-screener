@@ -2,30 +2,46 @@
 
 Small weekly momentum screener and exploratory backtest for a simulated Bloomberg Global Trading Challenge portfolio. First download a persistent local dataset, then run the screener or the offline three-year backtest. Yahoo Finance supplies prices; trades are entered manually in Bloomberg. The project does not use the Bloomberg API or automate execution.
 
-## Setup (Windows PowerShell, Python 3.11+)
+## Setup (Windows, beginner-friendly)
 
-For everyday use after setup, open one of the scripts in **`run/`** and click **Run**: `run/01_download_data.py` updates data, `run/02_run_screener.py` screens the saved dataset, and `run/03_run_backtest.py` runs the three-year backtest. These launchers use the project's `.venv` and set the working directory automatically, even if the editor selects another Python. The screening launcher explicitly skips failed ticker updates and reports exclusions. They also forward command-line arguments. Initial `.venv` setup is still required.
+Use Python 3.11 or newer. Open PowerShell, then run the following commands from the project folder. Replace the path in the first command with the folder where you cloned this repository.
 
 ```powershell
+cd "C:\path\to\bloomberg-competition-screener"
+py --version
 py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-download-data
-run-screener
-run-backtest
-python -m pytest
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-Activation is optional: `.\.venv\Scripts\download-data.exe` and `.\.venv\Scripts\run-screener.exe` work directly. Module alternatives are `python -m competition_screener.download` and `python -m competition_screener`. Do not change your system execution policy just for this project.
+If `py -3.11` is unavailable, install Python from [python.org](https://www.python.org/downloads/) and enable **Add Python to PATH**, or use the version shown by `py --list`.
 
-`requirements-lock.txt` records the versions verified in the development environment. For the same versions, install it before the editable package: `python -m pip install -r requirements-lock.txt`, then `python -m pip install -e ".[dev]"`. CI runs tests and lint; no live network downloads are required by tests.
+You do not need to activate the virtual environment. The safest commands are the project launchers, which always use `.venv` and the correct working directory:
 
 ```powershell
-download-data --years 2
-download-data --universe my_universe.csv
-download-data --refresh
-run-screener --before 2026-09-26
+python run\01_download_data.py   # download or update the local data
+python run\02_run_screener.py    # produce the weekly top-10 ranking
+python run\03_run_backtest.py    # run the three-year sanity-check backtest
 ```
+
+In VS Code, open the files in `run/` and click **Run Python File**. Run them in this order: download data, screener, then optional backtest. The first download can take several minutes and requires an internet connection.
+
+If PowerShell says that script execution is disabled, do not change system-wide policy. Either continue using the launcher commands above, or allow scripts only for your user account:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+If installation fails, recreate the environment from the project folder:
+
+```powershell
+Remove-Item .venv -Recurse -Force
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+`requirements-lock.txt` records the versions verified in the development environment. CI runs tests and lint; tests do not require live downloads.
 
 Default universe: 1000 largest companies by reported USD market capitalization from the public [Nasdaq stock screener](https://www.nasdaq.com/market-activity/stocks/screener), with its country filter set to United States (not only Nasdaq-listed companies). The list refreshes with each download command, not with offline screening, and is sorted numerically by market cap. Common stock, common/ordinary shares and REIT beneficial-interest shares are accepted; name-based filters exclude funds, ETFs, preferred securities, depositary receipts, warrants, units and debt. Different share classes are grouped using normalized issuer names; the listing with the largest reported capitalization is retained, without summing company-level capitalization across classes. This is a source-based top 1000, not a certified issuer master: country labels, capitalization coverage and name-based classification can contain errors. It is not a WLS eligibility check.
 
@@ -58,7 +74,7 @@ Parquet replacement uses a temporary file. A failed update retains the previous 
 
 Downloads display a progress bar with percentage, checked tickers, saved histories, cached histories and failures. It advances when a batch completes, not on every individual network request. `missing_sessions.csv` lists every unresolved observed-session gap (ticker, date, reason), without truncating to ten dates; non-date-specific failures remain in `download_report.csv`. Weekends, holidays absent from the SPY reference, and days before the first available ticker row are not labeled missing sessions.
 
-For a small sanity check, `run-screener --skip-failed` explicitly excludes failed/pending tickers according to the current download report. This retains the original top-1000 list in the data store and records excluded tickers in output metadata. It does not delete dates, interpolate prices, or mark the original dataset complete. Unlike `--allow-incomplete`, it never uses the previous file of a ticker whose latest update failed. The flags are mutually exclusive. If no ready tickers remain, screening stops.
+For a small sanity check, `python run\02_run_screener.py` explicitly excludes failed/pending tickers according to the current download report. This retains the original top-1000 list in the data store and records excluded tickers in output metadata. It does not delete dates, interpolate prices, or mark the original dataset complete. Unlike `--allow-incomplete`, it never uses the previous file of a ticker whose latest update failed. The flags are mutually exclusive. If no ready tickers remain, screening stops.
 
 ## Transparent rules
 
@@ -81,7 +97,7 @@ Top ten receive proposed equal weights of 10% each. Fewer qualifiers leave 10% p
 
 ## Weekly use
 
-Each weekend, run `download-data`, then `run-screener --skip-failed` to explicitly exclude failed updates. Both commands retain timestamped universe/output records. If downloading on Friday after the close, set `--before` to Saturday only once that date is reached (future cutoffs are rejected); the simplest routine is Saturday or Sunday. Review the ten names and trade at the next permitted session. Compare target holdings with existing positions rather than adding another 10%. This version has no holdings or order-difference calculator. Transaction prices, whole shares, corporate actions and Yahoo/Bloomberg differences require manual checking. Weekly runs are manual; no scheduler is installed.
+Each weekend, run `python run\01_download_data.py`, then `python run\02_run_screener.py`. Both commands retain timestamped universe/output records. If downloading on Friday after the close, set `--before` to Saturday only once that date is reached (future cutoffs are rejected); the simplest routine is Saturday or Sunday. Review the ten names and trade at the next permitted session. Compare target holdings with existing positions rather than adding another 10%. This version has no holdings or order-difference calculator. Transaction prices, whole shares, corporate actions and Yahoo/Bloomberg differences require manual checking. Weekly runs are manual; no scheduler is installed.
 
 Each screening run creates a UTC timestamped output folder with `ranking.csv`, `portfolio.csv`, `rejected.csv`, `universe.csv`, `report.txt` and `metadata.json` referring to the local dataset. The console and text report show aligned bordered tables with company names, score out of 100, percentage returns and target weights, followed by a separate risk table. CSVs retain full numerical precision and gap dates. Prices are not duplicated in each report. Later downloads can revise the price store: retain a dataset copy if exact historical-run reproduction is required. Yahoo can throttle or omit symbols; check `download_report.csv`.
 
