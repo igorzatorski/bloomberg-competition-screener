@@ -1,0 +1,1 @@
+"""Small, transparent competition screener."""
